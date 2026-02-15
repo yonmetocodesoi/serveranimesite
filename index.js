@@ -7,50 +7,101 @@ const PORT = process.env.PORT || 1010;
 
 app.use(cors());
 
-// --- Providers ---
+// --- Providers (Brasileiros - PT-BR Legendado/Dublado) ---
+
+const GHOST_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.7',
+};
+
+// Gerar variações de slug para maximizar chances de achar no site BR
+function generateSlugVariations(slug) {
+    const base = slug.replace(/-dublado|-dub|-legendado|-todos-os-episodios/gi, '').replace(/-+$/, '');
+    const variations = [
+        slug,                    // original
+        base,                    // sem sufixo
+        `${base}-dublado`,       // com -dublado
+        `${base}-legendado`,     // com -legendado
+        `${base}-todos-os-episodios`, // formato antigo
+    ];
+    // Remover duplicatas
+    return [...new Set(variations)];
+}
 
 const AnimeFireProvider = {
-    name: 'VIP MASTER 1 [BRASIL]',
+    name: 'VIP MASTER 1 [BRASIL] 🇧🇷',
     slug: 'anime-fire',
-    baseUrl: 'https://animefire.plus/video/',
     async searchEpisode(slug, season, episode) {
-        const url = `${this.baseUrl}${slug}/${episode}`;
-        try {
-            const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 });
+        const domains = ['https://animefire.plus', 'https://animefire.net'];
+        const slugs = generateSlugVariations(slug);
 
-            if (response.data && response.data.data) {
-                return {
-                    error: false,
-                    episode: response.data.data[0].src
-                };
+        for (const domain of domains) {
+            for (const s of slugs) {
+                try {
+                    const url = `${domain}/video/${s}/${episode}`;
+                    console.log(`[AnimeFire] Trying: ${url}`);
+                    const response = await axios.get(url, {
+                        headers: { ...GHOST_HEADERS, 'Referer': `${domain}/` },
+                        timeout: 5000
+                    });
+
+                    // Formato JSON direto (mais comum)
+                    if (response.data?.data?.[0]?.src) {
+                        console.log(`[AnimeFire] FOUND via JSON: ${s}`);
+                        return { error: false, episode: response.data.data[0].src };
+                    }
+
+                    // Formato HTML com video tag
+                    const srcMatch = response.data.match(/src\s*[:=]\s*["']?(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/i);
+                    if (srcMatch) {
+                        console.log(`[AnimeFire] FOUND via regex: ${s}`);
+                        return { error: false, episode: srcMatch[1] };
+                    }
+                } catch (e) { }
             }
-            return { error: true, episode: null };
-        } catch (e) {
-            return { error: true, episode: null };
         }
+        return { error: true, episode: null };
     }
 };
 
 const AnimesOnlineCCProvider = {
-    name: 'VIP MASTER 2 [BRASIL]',
+    name: 'VIP MASTER 2 [BRASIL] 🇧🇷',
     slug: 'animes-online-cc',
-    baseUrl: 'https://animesonlinecc.to/episodio/',
     async searchEpisode(slug, season, episode) {
-        const url = `${this.baseUrl}${slug}-episodio-${episode}`;
-        try {
-            const response = await axios.get(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 5000 });
+        const slugs = generateSlugVariations(slug);
 
-            const match = response.data.match(/<iframe.*?src="(.*?)".*?>/i);
-            if (match && match[1]) {
-                return {
-                    error: false,
-                    episode: match[1]
-                };
+        for (const s of slugs) {
+            const urls = [
+                `https://animesonlinecc.to/episodio/${s}-episodio-${episode}`,
+                `https://animesonlinecc.to/episodio/${s}-${episode}`,
+                `https://animesonlinecc.to/episodio/${s}`,
+            ];
+
+            for (const url of urls) {
+                try {
+                    console.log(`[AnimesOnlineCC] Trying: ${url}`);
+                    const response = await axios.get(url, { headers: GHOST_HEADERS, timeout: 5000 });
+
+                    // Buscar iframe com classe metaframe (player principal)
+                    const metaMatch = response.data.match(/<iframe[^>]+class="metaframe[^"]*"[^>]+src="([^"]+)"/i);
+                    if (metaMatch?.[1]) {
+                        const src = metaMatch[1].startsWith('//') ? `https:${metaMatch[1]}` : metaMatch[1];
+                        console.log(`[AnimesOnlineCC] FOUND metaframe: ${s}`);
+                        return { error: false, episode: src };
+                    }
+
+                    // Fallback: qualquer iframe
+                    const iframeMatch = response.data.match(/<iframe[^>]+src="([^"]+)"/i);
+                    if (iframeMatch?.[1]) {
+                        const src = iframeMatch[1].startsWith('//') ? `https:${iframeMatch[1]}` : iframeMatch[1];
+                        console.log(`[AnimesOnlineCC] FOUND iframe: ${s}`);
+                        return { error: false, episode: src };
+                    }
+                } catch (e) { }
             }
-            return { error: true, episode: null };
-        } catch (e) {
-            return { error: true, episode: null };
         }
+        return { error: true, episode: null };
     }
 };
 
