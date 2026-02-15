@@ -5,7 +5,11 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 1010;
 
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    allowedHeaders: ['Content-Type', 'Authorization', 'Bypass-Tunnel-Reminder'],
+    methods: ['GET', 'POST', 'OPTIONS']
+}));
 
 // --- Providers (Brasileiros - PT-BR Legendado/Dublado) ---
 
@@ -245,6 +249,123 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
     });
 });
 
+app.get(['/api/search/:query', '/search/:query'], async (req, res) => {
+    const { query } = req.params;
+    try {
+        const url = `https://animesonlinecc.to/search/${encodeURIComponent(query)}/`;
+        console.log(`[Sugoi-Node] Searching: ${url}`);
+
+        const response = await axios.get(url, {
+            headers: GHOST_HEADERS,
+            timeout: 8000
+        });
+
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(response.data);
+        const results = [];
+
+        $('article').each((i, el) => {
+            const anchor = $(el).find('div.poster > a');
+            let image = $(el).find('div.poster > a > img').attr('src');
+
+            if (image && image.startsWith('/')) {
+                image = `https://animesonlinecc.to${image}`;
+            }
+
+            const rating = $(el).find('div.poster > div.rating').text().trim();
+            const title = $(el).find('div.data > h3').text().trim();
+            const href = anchor.attr('href') || '';
+            const slug = href.split('/').filter(Boolean).pop();
+
+            if (slug && title) {
+                results.push({
+                    title,
+                    slug,
+                    image,
+                    rating: rating || '10.0',
+                    category: 'Anime',
+                    status: 'Online',
+                    description: 'Resultado da busca global.',
+                    type: href.includes('/anime/') ? 'serie' : 'movie'
+                });
+            }
+        });
+
+        res.json({
+            error: false,
+            data: results
+        });
+
+    } catch (e) {
+        console.error(`[Sugoi-Node] Search error:`, e.message);
+        res.status(500).json({
+            error: true,
+            message: e.message
+        });
+    }
+});
+
+app.get(['/api/details/:id', '/details/:id'], async (req, res) => {
+    const { id } = req.params;
+    try {
+        const url = `https://animesonlinecc.to/anime/${id}`;
+        console.log(`[Sugoi-Node] Fetching Details: ${url}`);
+
+        const response = await axios.get(url, {
+            headers: GHOST_HEADERS,
+            timeout: 8000
+        });
+
+        const cheerio = require('cheerio');
+        const $ = cheerio.load(response.data);
+        const seasons = [];
+
+        $('.se-c').each((i, seasonEl) => {
+            const seasonNumber = $(seasonEl).find('.title').text().trim();
+            const episodes = [];
+
+            $(seasonEl).find('.episodes li').each((j, epEl) => {
+                const epAnchor = $(epEl).find('.poster a');
+                const epHref = epAnchor.attr('href') || '';
+                const epSlug = epHref.split('/').filter(Boolean).pop();
+                const epImage = $(epEl).find('.poster img').attr('src');
+                const epDate = $(epEl).find('.metadata .date').text().trim();
+
+                if (epSlug) {
+                    episodes.push({
+                        slug: epSlug,
+                        image: epImage,
+                        date: epDate
+                    });
+                }
+            });
+
+            seasons.push({
+                seasonNumber,
+                episodes
+            });
+        });
+
+        res.json({
+            error: false,
+            data: {
+                title: $('.data h1').text().trim(),
+                image: $('.poster img').attr('src'),
+                synopsis: $('.resumotemp p').text().trim(),
+                rating: $('.dt_rating_vgs').text().trim(),
+                seasons
+            }
+        });
+
+    } catch (e) {
+        console.error(`[Sugoi-Node] Details error:`, e.message);
+        res.status(500).json({
+            error: true,
+            message: e.message
+        });
+    }
+});
+
 app.get('/proxy', async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).send('No URL provided');
@@ -301,7 +422,18 @@ app.get('/proxy', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`\x1b[36m[SugoiAPI-Node] Running at http://localhost:${PORT}\x1b[00m`);
+
+    // Show LAN IP
+    const { networkInterfaces } = require('os');
+    const nets = networkInterfaces();
+    for (const name of Object.keys(nets)) {
+        for (const net of nets[name]) {
+            if (net.family === 'IPv4' && !net.internal) {
+                console.log(`\x1b[36m[SugoiAPI-Node] Network: http://${net.address}:${PORT}\x1b[00m`);
+            }
+        }
+    }
     console.log(`\x1b[33mPress Ctrl+C to stop.\x1b[00m`);
 });
