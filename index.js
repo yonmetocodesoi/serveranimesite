@@ -54,25 +54,52 @@ const AnimesOnlineCCProvider = {
     }
 };
 
-// --- Resolve TMDB ID ---
+// --- Resolve TMDB ID via AniList + MalSync (100% grátis, sem API key) ---
 async function resolveTmdbId(title) {
     try {
         const cleanTitle = title
-            .replace(/-dublado|-dub|-legendado/gi, '')
+            .replace(/-dublado|-dub|-legendado|-todos-os-episodios/gi, '')
             .replace(/-/g, ' ')
             .trim();
 
-        const searchUrl = `https://api.themoviedb.org/3/search/tv?query=${encodeURIComponent(cleanTitle)}&language=pt-BR&api_key=d56e51fb77b081a9cb5192571b7c672d`;
-        const res = await axios.get(searchUrl, { timeout: 3000 });
-        if (res.data.results && res.data.results.length > 0) {
-            return res.data.results[0].id.toString();
+        // Passo 1: Buscar no AniList para obter o MAL ID
+        const query = `
+            query ($search: String) {
+                Media(search: $search, type: ANIME) {
+                    id
+                    idMal
+                    title { english romaji }
+                }
+            }
+        `;
+        const aniRes = await axios.post('https://graphql.anilist.co', {
+            query,
+            variables: { search: cleanTitle }
+        }, { timeout: 3000 });
+
+        const media = aniRes.data?.data?.Media;
+        if (!media?.idMal) return null;
+
+        // Passo 2: Usar MalSync para converter MAL ID → TMDB ID
+        const malSyncUrl = `https://api.malsync.moe/mal/anime/${media.idMal}`;
+        const malRes = await axios.get(malSyncUrl, { timeout: 3000 });
+
+        // MalSync retorna sites com TMDB entries
+        const sites = malRes.data?.Sites;
+        if (sites?.Tmdb) {
+            const tmdbEntry = Object.values(sites.Tmdb)[0];
+            if (tmdbEntry?.url) {
+                // URL tipo: https://www.themoviedb.org/tv/62715
+                const match = tmdbEntry.url.match(/\/(tv|movie)\/(\d+)/);
+                if (match) return match[2];
+            }
         }
-        const movieUrl = `https://api.themoviedb.org/3/search/movie?query=${encodeURIComponent(cleanTitle)}&language=pt-BR&api_key=d56e51fb77b081a9cb5192571b7c672d`;
-        const movieRes = await axios.get(movieUrl, { timeout: 3000 });
-        if (movieRes.data.results && movieRes.data.results.length > 0) {
-            return movieRes.data.results[0].id.toString();
-        }
-    } catch (e) { }
+
+        // Fallback: retornar o MAL ID (alguns players aceitam)
+        return media.idMal.toString();
+    } catch (e) {
+        console.log('[Sugoi-Node] TMDB resolve error:', e.message);
+    }
     return null;
 }
 
