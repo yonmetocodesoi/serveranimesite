@@ -203,7 +203,7 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
     // SEMPRE adicionar servidores de embed
     if (tmdbId) {
         results.push({
-            name: 'VIP MASTER Play [BR]',
+            name: 'Smashy Stream [Global/English]',
             slug: 'smashy',
             is_embed: true,
             episodes: [{
@@ -214,7 +214,7 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
             }]
         });
         results.push({
-            name: 'VIP MASTER 4K [BR]',
+            name: 'VidSrc 4K [Global/English]',
             slug: 'vidsrc-pm',
             is_embed: true,
             episodes: [{
@@ -225,7 +225,7 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
             }]
         });
         results.push({
-            name: 'Global Play (HD)',
+            name: 'VidSrc HD [Global/English]',
             slug: 'vidsrc-me',
             is_embed: true,
             episodes: [{
@@ -259,13 +259,18 @@ app.get('/proxy', async (req, res) => {
             'Connection': 'keep-alive'
         };
 
-        if (url.includes('lightspeedst.net')) {
+        if (url.includes('lightspeedst.net') || url.includes('animefire')) {
             headers['Referer'] = 'https://animefire.plus/';
             headers['Origin'] = 'https://animefire.plus';
+            // Mimic Chrome on Windows to reduce bot detection
+            headers['Sec-Ch-Ua'] = '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"';
+            headers['Sec-Ch-Ua-Mobile'] = '?0';
+            headers['Sec-Ch-Ua-Platform'] = '"Windows"';
         } else if (url.includes('blogger.com') || url.includes('google.com')) {
             headers['Referer'] = 'https://www.blogger.com/';
         } else if (url.includes('animesonlinecc')) {
             headers['Referer'] = 'https://animesonlinecc.to/';
+            headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
         }
 
         const response = await axios({
