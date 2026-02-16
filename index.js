@@ -39,7 +39,7 @@ const AnimeFireProvider = {
     slug: 'anime-fire',
     async searchEpisode(slug, season, episode) {
         const domains = ['https://animefire.plus', 'https://animefire.net'];
-        const slugs = generateSlugVariations(slug);
+        const slugs = slug.includes(',') ? slug.split(',') : [slug];
 
         for (const domain of domains) {
             for (const s of slugs) {
@@ -48,16 +48,14 @@ const AnimeFireProvider = {
                     console.log(`[AnimeFire] Trying: ${url}`);
                     const response = await axios.get(url, {
                         headers: { ...GHOST_HEADERS, 'Referer': `${domain}/` },
-                        timeout: 5000
+                        timeout: 4000
                     });
 
-                    // Formato JSON direto (mais comum)
                     if (response.data?.data?.[0]?.src) {
                         console.log(`[AnimeFire] FOUND via JSON: ${s}`);
                         return { error: false, episode: response.data.data[0].src };
                     }
 
-                    // Formato HTML com video tag
                     const srcMatch = response.data.match(/src\s*[:=]\s*["']?(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/i);
                     if (srcMatch) {
                         console.log(`[AnimeFire] FOUND via regex: ${s}`);
@@ -74,7 +72,8 @@ const AnimesOnlineCCProvider = {
     name: 'VIP MASTER 2 [BRASIL] 🇧🇷',
     slug: 'animes-online-cc',
     async searchEpisode(slug, season, episode) {
-        const slugs = generateSlugVariations(slug);
+        // O servidor agora recebe o slug limpo e gera as variações internamente se necessário
+        const slugs = slug.includes(',') ? slug.split(',') : [slug];
 
         for (const s of slugs) {
             const urls = [
@@ -86,9 +85,8 @@ const AnimesOnlineCCProvider = {
             for (const url of urls) {
                 try {
                     console.log(`[AnimesOnlineCC] Trying: ${url}`);
-                    const response = await axios.get(url, { headers: GHOST_HEADERS, timeout: 5000 });
+                    const response = await axios.get(url, { headers: GHOST_HEADERS, timeout: 4000 });
 
-                    // Buscar iframe com classe metaframe (player principal)
                     const metaMatch = response.data.match(/<iframe[^>]+class="metaframe[^"]*"[^>]+src="([^"]+)"/i);
                     if (metaMatch?.[1]) {
                         const src = metaMatch[1].startsWith('//') ? `https:${metaMatch[1]}` : metaMatch[1];
@@ -96,7 +94,6 @@ const AnimesOnlineCCProvider = {
                         return { error: false, episode: src };
                     }
 
-                    // Fallback: qualquer iframe
                     const iframeMatch = response.data.match(/<iframe[^>]+src="([^"]+)"/i);
                     if (iframeMatch?.[1]) {
                         const src = iframeMatch[1].startsWith('//') ? `https:${iframeMatch[1]}` : iframeMatch[1];
@@ -180,7 +177,7 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
     console.log(`[Sugoi-Node] Fetching: ${slug} | Season: ${season} | Ep: ${episodeNumber} | TMDB: ${tmdbId}`);
 
     // Resolve TMDB ID if not provided
-    if (!tmdbId) {
+    if (!tmdbId && slug !== 'undefined') {
         const resolved = await resolveTmdbId(slug);
         if (resolved) {
             tmdbId = resolved;
@@ -188,12 +185,17 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
         }
     }
 
+    const slugs = generateSlugVariations(slug);
+    console.log(`[Sugoi-Node] Variations: ${slugs.join(', ')}`);
+
     const providers = [AnimeFireProvider, AnimesOnlineCCProvider];
     const results = [];
 
+    // Tentar cada provider com TODAS as variações de slug de uma vez (mais rápido)
     for (const provider of providers) {
         try {
-            const episodeData = await provider.searchEpisode(slug, season, episodeNumber);
+            // Passamos a lista de slugs separada por vírgula para o provider saber que são variações
+            const episodeData = await provider.searchEpisode(slugs.join(','), season, episodeNumber);
             if (!episodeData.error && episodeData.episode) {
                 results.push({
                     name: provider.name,
@@ -201,6 +203,8 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
                     is_embed: provider.slug !== 'anime-fire',
                     episodes: [episodeData]
                 });
+                // Se achou em um provider BR, já podemos retornar (opcional, para ser mais rápido)
+                // break; 
             }
         } catch (err) { }
     }
