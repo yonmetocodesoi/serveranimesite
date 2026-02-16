@@ -72,28 +72,23 @@ const AnimesOnlineCCProvider = {
     name: 'VIP MASTER 2 [BRASIL] 🇧🇷',
     slug: 'animes-online-cc',
     async searchEpisode(slug, season, episode) {
-        // O servidor agora recebe o slug limpo e gera as variações internamente se necessário
         const slugs = slug.includes(',') ? slug.split(',') : [slug];
-
         for (const s of slugs) {
             const urls = [
                 `https://animesonlinecc.to/episodio/${s}-episodio-${episode}`,
                 `https://animesonlinecc.to/episodio/${s}-${episode}`,
                 `https://animesonlinecc.to/episodio/${s}`,
             ];
-
             for (const url of urls) {
                 try {
                     console.log(`[AnimesOnlineCC] Trying: ${url}`);
                     const response = await axios.get(url, { headers: GHOST_HEADERS, timeout: 4000 });
-
                     const metaMatch = response.data.match(/<iframe[^>]+class="metaframe[^"]*"[^>]+src="([^"]+)"/i);
                     if (metaMatch?.[1]) {
                         const src = metaMatch[1].startsWith('//') ? `https:${metaMatch[1]}` : metaMatch[1];
                         console.log(`[AnimesOnlineCC] FOUND metaframe: ${s}`);
                         return { error: false, episode: src };
                     }
-
                     const iframeMatch = response.data.match(/<iframe[^>]+src="([^"]+)"/i);
                     if (iframeMatch?.[1]) {
                         const src = iframeMatch[1].startsWith('//') ? `https:${iframeMatch[1]}` : iframeMatch[1];
@@ -103,6 +98,21 @@ const AnimesOnlineCCProvider = {
                 } catch (e) { }
             }
         }
+        return { error: true, episode: null };
+    }
+};
+
+const EmbedMoviesProvider = {
+    name: 'EmbedMovies [MUNDIAL]',
+    slug: 'embed-movies',
+    async search(imdbId, tmdbId, season, episode, isMovie) {
+        try {
+            if (isMovie && imdbId) {
+                return { error: false, episode: `https://playerflixapi.com/filme/${imdbId}` };
+            } else if (!isMovie && tmdbId) {
+                return { error: false, episode: `https://playerflixapi.com/serie/${tmdbId}/${season}/${episode}` };
+            }
+        } catch (e) { }
         return { error: true, episode: null };
     }
 };
@@ -194,7 +204,6 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
     // Tentar cada provider com TODAS as variações de slug de uma vez (mais rápido)
     for (const provider of providers) {
         try {
-            // Passamos a lista de slugs separada por vírgula para o provider saber que são variações
             const episodeData = await provider.searchEpisode(slugs.join(','), season, episodeNumber);
             if (!episodeData.error && episodeData.episode) {
                 results.push({
@@ -203,10 +212,20 @@ app.get(['/api/episode/:slug/:season/:episodeNumber', '/episode/:slug/:season/:e
                     is_embed: provider.slug !== 'anime-fire',
                     episodes: [episodeData]
                 });
-                // Se achou em um provider BR, já podemos retornar (opcional, para ser mais rápido)
-                // break; 
             }
         } catch (err) { }
+    }
+
+    // EmbedMovies (Novo)
+    const imdbId = req.query.imdbId;
+    const embedRes = await EmbedMoviesProvider.search(imdbId, tmdbId, season, episodeNumber, isMovie);
+    if (!embedRes.error) {
+        results.push({
+            name: EmbedMoviesProvider.name,
+            slug: EmbedMoviesProvider.slug,
+            is_embed: true,
+            episodes: [embedRes]
+        });
     }
 
     // SEMPRE adicionar servidores de embed
